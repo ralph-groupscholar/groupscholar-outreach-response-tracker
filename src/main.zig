@@ -71,7 +71,7 @@ fn printUsage() !void {
         "  outreach-tracker import <csv_path>\n" ++
         "  outreach-tracker log --scholar <id> --channel <channel> --sent <timestamp> [--responded <timestamp>] [--response-type <type>] [--notes <notes>]\n" ++
         "  outreach-tracker report\n\n" ++
-        "  outreach-tracker queue [--hours <n>]\n\n" ++
+        "  outreach-tracker queue [--hours <n>] [--limit <n>] [--channel <name>]\n\n" ++
         "Environment:\n" ++
         "  GS_DB_URL  PostgreSQL connection string.\n\n";
     try out.print("{s}", .{usage});
@@ -281,11 +281,19 @@ fn runReport(allocator: std.mem.Allocator) !void {
 
 fn runQueue(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var hours: u32 = 48;
+    var limit: u32 = 25;
+    var channel: ?[]const u8 = null;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--hours") and i + 1 < args.len) {
             hours = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--limit") and i + 1 < args.len) {
+            limit = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--channel") and i + 1 < args.len) {
+            channel = args[i + 1];
             i += 1;
         }
     }
@@ -293,10 +301,20 @@ fn runQueue(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const db_url = try getDbUrl(allocator);
     defer allocator.free(db_url);
 
+    var channel_clause = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer channel_clause.deinit();
+    if (channel) |channel_value| {
+        const escaped = try root.escapeSql(allocator, channel_value);
+        defer allocator.free(escaped);
+        try channel_clause.appendSlice(" AND channel = '");
+        try channel_clause.appendSlice(escaped);
+        try channel_clause.append('\'');
+    }
+
     const query = try std.fmt.allocPrint(
         allocator,
-        "SELECT id, scholar_id, channel, sent_at, ROUND(EXTRACT(EPOCH FROM (NOW() - sent_at)) / 3600, 1) AS hours_outstanding FROM {s}.outreach_logs WHERE responded_at IS NULL AND sent_at <= NOW() - INTERVAL '{d} hours' ORDER BY sent_at ASC;",
-        .{ SchemaName, hours },
+        "SELECT id, scholar_id, channel, sent_at, ROUND(EXTRACT(EPOCH FROM (NOW() - sent_at)) / 3600, 1) AS hours_outstanding FROM {s}.outreach_logs WHERE responded_at IS NULL AND sent_at <= NOW() - INTERVAL '{d} hours'{s} ORDER BY sent_at ASC LIMIT {d};",
+        .{ SchemaName, hours, channel_clause.items, limit },
     );
     defer allocator.free(query);
 

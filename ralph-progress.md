@@ -8,3 +8,7 @@
 ## 2026-02-08
 - Added a follow-up queue command with an hours threshold to flag overdue outreach attempts.
 - Documented the new queue workflow in the README and added parsing tests for positive integers.
+
+## 2026-02-08
+- Extended the follow-up queue command with channel filtering and result limits for targeted outreach lists.
+- Updated README examples to reflect the new queue options.

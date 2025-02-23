@@ -42,10 +42,10 @@ Run reports:
 zig build run -- report
 ```
 
-View the follow-up queue (defaults to 48 hours outstanding):
+View the follow-up queue (defaults to 48 hours outstanding, limit 25):
 
 ```bash
-zig build run -- queue --hours 72
+zig build run -- queue --hours 72 --limit 10 --channel sms
 ```
 
 ## Development
