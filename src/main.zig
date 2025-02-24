@@ -57,6 +57,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, command, "triage")) {
+        try runTriage(allocator, args[2..]);
+        return;
+    }
+
     std.debug.print("Unknown command: {s}\n", .{command});
     try printUsage();
 }
@@ -72,6 +77,7 @@ fn printUsage() !void {
         "  outreach-tracker log --scholar <id> --channel <channel> --sent <timestamp> [--responded <timestamp>] [--response-type <type>] [--notes <notes>]\n" ++
         "  outreach-tracker report\n\n" ++
         "  outreach-tracker queue [--hours <n>] [--limit <n>] [--channel <name>]\n\n" ++
+        "  outreach-tracker triage [--days <n>] [--min-attempts <n>] [--limit <n>] [--channel <name>]\n\n" ++
         "Environment:\n" ++
         "  GS_DB_URL  PostgreSQL connection string.\n\n";
     try out.print("{s}", .{usage});
@@ -327,6 +333,58 @@ fn runQueue(allocator: std.mem.Allocator, args: []const []const u8) !void {
     );
 }
 
+fn runTriage(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    var days: u32 = 30;
+    var min_attempts: u32 = 2;
+    var limit: u32 = 20;
+    var channel: ?[]const u8 = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--days") and i + 1 < args.len) {
+            days = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--min-attempts") and i + 1 < args.len) {
+            min_attempts = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--limit") and i + 1 < args.len) {
+            limit = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--channel") and i + 1 < args.len) {
+            channel = args[i + 1];
+            i += 1;
+        }
+    }
+
+    const db_url = try getDbUrl(allocator);
+    defer allocator.free(db_url);
+
+    var channel_clause = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer channel_clause.deinit();
+    if (channel) |channel_value| {
+        const escaped = try root.escapeSql(allocator, channel_value);
+        defer allocator.free(escaped);
+        try channel_clause.appendSlice(" AND channel = '");
+        try channel_clause.appendSlice(escaped);
+        try channel_clause.append('\'');
+    }
+
+    const query = try std.fmt.allocPrint(
+        allocator,
+        "SELECT scholar_id, COUNT(*) AS outstanding, MAX(sent_at) AS last_sent_at, ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(sent_at))) / 3600, 1) AS hours_since_last, string_agg(DISTINCT channel, ', ' ORDER BY channel) AS channels FROM {s}.outreach_logs WHERE responded_at IS NULL AND sent_at >= NOW() - INTERVAL '{d} days'{s} GROUP BY scholar_id HAVING COUNT(*) >= {d} ORDER BY outstanding DESC, last_sent_at ASC LIMIT {d};",
+        .{ SchemaName, days, channel_clause.items, min_attempts, limit },
+    );
+    defer allocator.free(query);
+
+    std.debug.print("Scholars with >= {d} unanswered attempts in last {d} days:\n", .{ min_attempts, days });
+    try runPsql(
+        allocator,
+        db_url,
+        query,
+        &.{ "-F", "\t", "-t" },
+    );
+}
+
 fn findHeaderIndex(headers: [][]u8, name: []const u8) ?usize {
     for (headers, 0..) |header, idx| {
         if (std.mem.eql(u8, std.mem.trim(u8, header, " \t"), name)) return idx;
@@ -356,4 +414,9 @@ fn parsePositiveInt(value: []const u8) !u32 {
 test "parsePositiveInt rejects zero" {
     const result = parsePositiveInt("0");
     try std.testing.expectError(error.InvalidValue, result);
+}
+
+test "parsePositiveInt rejects negative numbers" {
+    const result = parsePositiveInt("-1");
+    try std.testing.expectError(error.Overflow, result);
 }

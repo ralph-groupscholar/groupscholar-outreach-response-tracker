@@ -48,6 +48,12 @@ View the follow-up queue (defaults to 48 hours outstanding, limit 25):
 zig build run -- queue --hours 72 --limit 10 --channel sms
 ```
 
+Triage scholars with repeated unanswered outreach (defaults to 30 days, min 2 attempts):
+
+```bash
+zig build run -- triage --days 14 --min-attempts 3 --limit 15
+```
+
 ## Development
 
 Run tests:

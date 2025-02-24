@@ -12,3 +12,7 @@
 ## 2026-02-08
 - Extended the follow-up queue command with channel filtering and result limits for targeted outreach lists.
 - Updated README examples to reflect the new queue options.
+
+## 2026-02-08
+- Added a triage command to surface scholars with repeated unanswered outreach attempts in a recent window.
+- Expanded CLI usage + README with triage workflow and added a parsing test for negative inputs.
