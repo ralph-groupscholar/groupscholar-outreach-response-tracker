@@ -62,6 +62,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, command, "sla")) {
+        try runSla(allocator, args[2..]);
+        return;
+    }
+
     std.debug.print("Unknown command: {s}\n", .{command});
     try printUsage();
 }
@@ -78,6 +83,7 @@ fn printUsage() !void {
         "  outreach-tracker report\n\n" ++
         "  outreach-tracker queue [--hours <n>] [--limit <n>] [--channel <name>]\n\n" ++
         "  outreach-tracker triage [--days <n>] [--min-attempts <n>] [--limit <n>] [--channel <name>]\n\n" ++
+        "  outreach-tracker sla [--channel <name>] [--since-days <n>]\n\n" ++
         "Environment:\n" ++
         "  GS_DB_URL  PostgreSQL connection string.\n\n";
     try out.print("{s}", .{usage});
@@ -377,6 +383,62 @@ fn runTriage(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer allocator.free(query);
 
     std.debug.print("Scholars with >= {d} unanswered attempts in last {d} days:\n", .{ min_attempts, days });
+    try runPsql(
+        allocator,
+        db_url,
+        query,
+        &.{ "-F", "\t", "-t" },
+    );
+}
+
+fn runSla(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    var channel: ?[]const u8 = null;
+    var since_days: ?u32 = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--channel") and i + 1 < args.len) {
+            channel = args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--since-days") and i + 1 < args.len) {
+            since_days = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        }
+    }
+
+    const db_url = try getDbUrl(allocator);
+    defer allocator.free(db_url);
+
+    var where_clause = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer where_clause.deinit();
+    if (channel) |channel_value| {
+        const escaped = try root.escapeSql(allocator, channel_value);
+        defer allocator.free(escaped);
+        try where_clause.appendSlice(" AND channel = '");
+        try where_clause.appendSlice(escaped);
+        try where_clause.append('\'');
+    }
+    if (since_days) |days| {
+        const days_str = try std.fmt.allocPrint(allocator, "{d}", .{days});
+        defer allocator.free(days_str);
+        try where_clause.appendSlice(" AND sent_at >= NOW() - INTERVAL '");
+        try where_clause.appendSlice(days_str);
+        try where_clause.appendSlice(" days'");
+    }
+
+    const query = try std.fmt.allocPrint(
+        allocator,
+        "SELECT channel, COUNT(*) AS sent, COUNT(responded_at) AS responded, " ++
+            "ROUND(100.0 * COUNT(*) FILTER (WHERE responded_at IS NOT NULL AND responded_at - sent_at <= INTERVAL '24 hours') / NULLIF(COUNT(*),0), 1) AS pct_24h, " ++
+            "ROUND(100.0 * COUNT(*) FILTER (WHERE responded_at IS NOT NULL AND responded_at - sent_at <= INTERVAL '48 hours') / NULLIF(COUNT(*),0), 1) AS pct_48h, " ++
+            "ROUND(100.0 * COUNT(*) FILTER (WHERE responded_at IS NOT NULL AND responded_at - sent_at <= INTERVAL '72 hours') / NULLIF(COUNT(*),0), 1) AS pct_72h, " ++
+            "ROUND(100.0 * COUNT(*) FILTER (WHERE responded_at IS NULL) / NULLIF(COUNT(*),0), 1) AS pct_outstanding " ++
+            "FROM {s}.outreach_logs WHERE 1=1{s} GROUP BY channel ORDER BY pct_48h DESC, sent DESC;",
+        .{ SchemaName, where_clause.items },
+    );
+    defer allocator.free(query);
+
+    std.debug.print("Response SLA coverage by channel (24h/48h/72h/outstanding):\n", .{});
     try runPsql(
         allocator,
         db_url,

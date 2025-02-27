@@ -14,5 +14,9 @@
 - Updated README examples to reflect the new queue options.
 
 ## 2026-02-08
+- Added an SLA coverage report with optional channel and recent-window filters.
+- Documented the SLA report workflow in the README.
+
+## 2026-02-08
 - Added a triage command to surface scholars with repeated unanswered outreach attempts in a recent window.
 - Expanded CLI usage + README with triage workflow and added a parsing test for negative inputs.

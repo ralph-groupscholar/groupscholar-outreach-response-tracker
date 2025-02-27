@@ -54,6 +54,12 @@ Triage scholars with repeated unanswered outreach (defaults to 30 days, min 2 at
 zig build run -- triage --days 14 --min-attempts 3 --limit 15
 ```
 
+Review SLA coverage by channel (optional channel or time window):
+
+```bash
+zig build run -- sla --since-days 60
+```
+
 ## Development
 
 Run tests:
