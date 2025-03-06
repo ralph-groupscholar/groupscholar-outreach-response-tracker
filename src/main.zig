@@ -67,6 +67,11 @@ pub fn main() !void {
         return;
     }
 
+    if (std.mem.eql(u8, command, "focus")) {
+        try runFocus(allocator, args[2..]);
+        return;
+    }
+
     std.debug.print("Unknown command: {s}\n", .{command});
     try printUsage();
 }
@@ -84,6 +89,7 @@ fn printUsage() !void {
         "  outreach-tracker queue [--hours <n>] [--limit <n>] [--channel <name>]\n\n" ++
         "  outreach-tracker triage [--days <n>] [--min-attempts <n>] [--limit <n>] [--channel <name>]\n\n" ++
         "  outreach-tracker sla [--channel <name>] [--since-days <n>]\n\n" ++
+        "  outreach-tracker focus [--days <n>] [--min-sent <n>] [--limit <n>] [--channel <name>]\n\n" ++
         "Environment:\n" ++
         "  GS_DB_URL  PostgreSQL connection string.\n\n";
     try out.print("{s}", .{usage});
@@ -439,6 +445,64 @@ fn runSla(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer allocator.free(query);
 
     std.debug.print("Response SLA coverage by channel (24h/48h/72h/outstanding):\n", .{});
+    try runPsql(
+        allocator,
+        db_url,
+        query,
+        &.{ "-F", "\t", "-t" },
+    );
+}
+
+fn runFocus(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    var days: u32 = 60;
+    var min_sent: u32 = 3;
+    var limit: u32 = 25;
+    var channel: ?[]const u8 = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--days") and i + 1 < args.len) {
+            days = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--min-sent") and i + 1 < args.len) {
+            min_sent = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--limit") and i + 1 < args.len) {
+            limit = try parsePositiveInt(args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--channel") and i + 1 < args.len) {
+            channel = args[i + 1];
+            i += 1;
+        }
+    }
+
+    const db_url = try getDbUrl(allocator);
+    defer allocator.free(db_url);
+
+    var where_clause = std.array_list.AlignedManaged(u8, null).init(allocator);
+    defer where_clause.deinit();
+    if (channel) |channel_value| {
+        const escaped = try root.escapeSql(allocator, channel_value);
+        defer allocator.free(escaped);
+        try where_clause.appendSlice(" AND channel = '");
+        try where_clause.appendSlice(escaped);
+        try where_clause.append('\'');
+    }
+
+    const query = try std.fmt.allocPrint(
+        allocator,
+        "SELECT scholar_id, COUNT(*) AS sent, COUNT(responded_at) AS responded, " ++
+            "ROUND(COUNT(responded_at)::numeric / NULLIF(COUNT(*),0), 2) AS response_rate, " ++
+            "MAX(sent_at) AS last_sent_at, " ++
+            "ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(sent_at))) / 3600, 1) AS hours_since_last " ++
+            "FROM {s}.outreach_logs WHERE sent_at >= NOW() - INTERVAL '{d} days'{s} " ++
+            "GROUP BY scholar_id HAVING COUNT(*) >= {d} " ++
+            "ORDER BY response_rate ASC, sent DESC, last_sent_at ASC LIMIT {d};",
+        .{ SchemaName, days, where_clause.items, min_sent, limit },
+    );
+    defer allocator.free(query);
+
+    std.debug.print("Focus list: lowest response rates in last {d} days (min sent {d}):\n", .{ days, min_sent });
     try runPsql(
         allocator,
         db_url,

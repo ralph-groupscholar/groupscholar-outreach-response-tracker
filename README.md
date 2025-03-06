@@ -8,6 +8,7 @@ CLI for capturing outreach attempts and monitoring response rates across channel
 - Log one-off outreach attempts from the terminal
 - Generate response rate and response-time reports by channel
 - Surface outstanding follow-ups that need outreach nudges
+- Prioritize scholars with low response rates for targeted outreach
 
 ## Usage
 
@@ -58,6 +59,12 @@ Review SLA coverage by channel (optional channel or time window):
 
 ```bash
 zig build run -- sla --since-days 60
+```
+
+Identify scholars with low response rates over a recent window:
+
+```bash
+zig build run -- focus --days 45 --min-sent 4 --limit 20
 ```
 
 ## Development

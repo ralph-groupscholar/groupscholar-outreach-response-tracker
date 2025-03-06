@@ -20,3 +20,7 @@
 ## 2026-02-08
 - Added a triage command to surface scholars with repeated unanswered outreach attempts in a recent window.
 - Expanded CLI usage + README with triage workflow and added a parsing test for negative inputs.
+
+## 2026-02-08
+- Added a focus command to surface scholars with low response rates over a recent window, with filters for channel, minimum sends, and limit.
+- Documented the focus workflow in the README.
